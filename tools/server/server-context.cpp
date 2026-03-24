@@ -2129,6 +2129,8 @@ private:
         float  alora_scale       = -1.0f;
         size_t alora_disabled_id = 0;
 
+        int32_t prompt_tokens_processed_this_time = 0;
+
         // next, batch any pending prompts without exceeding n_batch
         if (params_base.cont_batching || batch.n_tokens == 0) {
             for (auto & slot : slots) {
@@ -2504,6 +2506,7 @@ private:
                             continue;
                         }
 
+                        prompt_tokens_processed_this_time += n_tokens_out;
                         slot.n_prompt_tokens_processed += n_tokens_out;
 
                         // add the image chunk to cache
@@ -2539,6 +2542,7 @@ private:
                             slot.task->need_embd());
                         slot.prompt.tokens.push_back(cur_tok);
 
+                        prompt_tokens_processed_this_time += 1;
                         slot.n_prompt_tokens_processed++;
 
                         // process the last few tokens of the prompt separately in order to allow for a checkpoint to be created.
@@ -2679,13 +2683,15 @@ private:
             llama_set_embeddings(ctx, slot_batched->task->need_embd());
         }
 
-        if (batch.n_tokens == 0) {
-            SRV_WRN("%s", "no tokens to decode\n");
-
+        if (batch.n_tokens == 0 && prompt_tokens_processed_this_time == 0) {
+            SRV_WRN("no tokens to decode and processed %d tokens\n", 0);
             if (++n_empty_consecutive > 3) {
                 GGML_ABORT("fatal error - please provide logs and repro in %s\n", "https://github.com/ggml-org/llama.cpp/pull/20277");
             }
         } else {
+            if (batch.n_tokens == 0) {
+                SRV_DBG("no tokens to decode, but processed %d tokens\n", prompt_tokens_processed_this_time);
+            }
             n_empty_consecutive = 0;
         }
 
