@@ -4649,6 +4649,16 @@ class Qwen3Model(Qwen2Model):
 
         yield from super().modify_tensors(data_torch, name, bid)
 
+@ModelBase.register("Qwen3ASRForConditionalGeneration")
+class Qwen3ASRModel(Qwen3Model):
+    model_arch = gguf.MODEL_ARCH.QWEN3
+    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
+        if name.startswith("thinker."):
+            name = name.replace("thinker.", "")
+        if name.startswith("audio"):
+            # skip multimodal tensors
+            return
+        yield from super().modify_tensors(data_torch, name, bid)
 
 @ModelBase.register("Qwen3MoeForCausalLM")
 class Qwen3MoeModel(Qwen2MoeModel):
@@ -10706,6 +10716,38 @@ class VoxtralWhisperEncoderModel(WhisperEncoderModel):
         self.gguf_writer.add_clip_projector_type(gguf.VisionProjectorType.VOXTRAL)
         self.gguf_writer.add_audio_stack_factor(4) # == intermediate_size // hidden_size
 
+@ModelBase.register("Qwen3ASRForConditionalGeneration")
+class Qwen3ASRWhisperEncoderModel(WhisperEncoderModel):
+    has_vision_encoder = False
+    has_audio_encoder = True
+    def get_audio_config(self) -> dict[str, Any] | None:
+        return self.global_config["thinker_config"].get("audio_config")
+    def set_gguf_parameters(self):
+        super().set_gguf_parameters()
+        self.gguf_writer.add_clip_projector_type(gguf.VisionProjectorType.QWEN3A)
+    def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
+        assert self.hparams_audio is not None
+        if name.startswith("thinker."):
+            name = name.replace("thinker.", "")
+        # Skip text model tensors - they go in the text model file
+        if name.startswith("model.") or name.startswith("lm_head."):
+            return
+        if "audio_tower." in name:
+            if "conv2d" in name and name.endswith(".bias"):
+                # transform conv2d bias [n_embd] --> [1, 1, n_embd]
+                data_torch = data_torch.unsqueeze(-1).unsqueeze(-1)
+        yield from super().modify_tensors(data_torch, name, bid)
+    def generate_extra_tensors(self) -> Iterable[tuple[str, Tensor]]:
+        # SinusoidsPositionEmbedding
+        assert self.hparams_audio is not None
+        max_timescale = 10000
+        length = 1500
+        channels = self.hparams_audio["hidden_size"]
+        log_timescale_increment = np.log(max_timescale) / (channels // 2 - 1)
+        inv_timescales = torch.exp(-log_timescale_increment * torch.arange(channels // 2).float())
+        scaled_time = torch.arange(length)[:, np.newaxis] * inv_timescales[np.newaxis, :]
+        pos_embd = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1).to(dtype=torch.float32)
+        yield ("audio_tower.embed_positions.weight", pos_embd)
 
 @ModelBase.register("AudioFlamingo3ForConditionalGeneration")
 class AudioFlamingo3WhisperEncoderModel(WhisperEncoderModel):

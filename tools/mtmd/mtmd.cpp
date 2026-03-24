@@ -351,6 +351,7 @@ struct mtmd_context {
             case PROJECTOR_TYPE_VOXTRAL:
             case PROJECTOR_TYPE_GLMA:
             case PROJECTOR_TYPE_MUSIC_FLAMINGO:
+            case PROJECTOR_TYPE_QWEN3A:
                 audio_preproc = std::make_unique<mtmd_audio_preprocessor_whisper>(ctx_a);
                 break;
             case PROJECTOR_TYPE_LFM2A:
@@ -368,7 +369,10 @@ struct mtmd_context {
             // <|audio_bos|> ... (embeddings) ... <|audio_eos|>
             aud_beg = "<|audio_bos|>";
             aud_end = "<|audio_eos|>";
-
+        } else if (proj == PROJECTOR_TYPE_QWEN3A) {
+            // <|audio_bos|> ... (embeddings) ... <|audio_eos|>
+            aud_beg = "<|audio_start|>";
+            aud_end = "<|audio_end|>";
         } else if (proj == PROJECTOR_TYPE_ULTRAVOX) {
             // [BEGIN_AUDIO] ... (embeddings) ...
             aud_beg = "[BEGIN_AUDIO]";

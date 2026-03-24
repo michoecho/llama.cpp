@@ -381,6 +381,7 @@ static bool log_mel_spectrogram(
             // TODO: Handle short audio differently or return error
             return false;
         }
+        n_samples = samples_padded.size();
         std::reverse_copy(samples + 1, samples + 1 + stage_2_pad, samples_padded.begin());
     }
 
@@ -555,8 +556,10 @@ bool mtmd_audio_preprocessor_whisper::preprocess(const float *                 s
     if (DEBUG) {
         printf("output: n_mel = %d, n_len = %d\n", out_full.n_mel, out_full.n_len);
     }
-    const size_t frames_per_chunk = 3000;
+
+    size_t frames_per_chunk = hparams.audio_chunk_len * (hparams.audio_sample_rate / hparams.audio_hop_len);
     GGML_ASSERT((size_t) out_full.n_len > frames_per_chunk);
+
     for (size_t off = 0; off < (size_t) out_full.n_len; off += frames_per_chunk) {
         int n_len = std::min(frames_per_chunk, (size_t) out_full.n_len - off);
         if ((size_t) n_len < frames_per_chunk) {
