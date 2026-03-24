@@ -846,6 +846,10 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
             {
                 builder = std::make_unique<clip_graph_whisper_enc>(ctx, img);
             } break;
+        case PROJECTOR_TYPE_QWEN3A:
+            {
+                builder = std::make_unique<clip_graph_qwen3a>(ctx, img);
+            } break;
         case PROJECTOR_TYPE_KIMIVL:
             {
                 builder = std::make_unique<clip_graph_kimivl>(ctx, img);
@@ -1258,6 +1262,7 @@ struct clip_model_loader {
                     } break;
                 case PROJECTOR_TYPE_ULTRAVOX:
                 case PROJECTOR_TYPE_QWEN2A:
+                case PROJECTOR_TYPE_QWEN3A:
                 case PROJECTOR_TYPE_GLMA:
                 case PROJECTOR_TYPE_VOXTRAL:
                 case PROJECTOR_TYPE_MUSIC_FLAMINGO:
@@ -1270,7 +1275,17 @@ struct clip_model_loader {
                         log_ffn_op = "gelu_erf"; // temporary solution for logging
 
                         // audio preprocessing params
-                        hparams.audio_chunk_len    = 30; // in seconds
+                        if (model.proj_type == PROJECTOR_TYPE_QWEN3A) {
+                            // Note: qwen3 audio encoders are trained with an assumption that
+                            // inference will use windowed attention with window size anywhere between 1s and 8s.
+                            // But clip_graph_qwen3a currently uses the generic (non-windowed) attention of `build_vit`.
+                            // We can deal with that either by implementing windowed attention in clip_graph_qwen3a,
+                            // or just limiting its chunk size to 8s.
+                            // Here, we implement the latter solution.
+                            hparams.audio_chunk_len = 1; // in seconds
+                        } else {
+                            hparams.audio_chunk_len = 30; // in seconds
+                        }
                         hparams.audio_sample_rate  = 16000;
                         hparams.audio_n_fft        = 400;
                         hparams.audio_window_len   = 400;
@@ -1782,6 +1797,20 @@ struct clip_model_loader {
                     model.conv1d_2_b = get_tensor(string_format(TN_CONV1D, 2, "bias"));
                     model.mm_fc_w = get_tensor(string_format(TN_MM_AUDIO_FC, "weight"));
                     model.mm_fc_b = get_tensor(string_format(TN_MM_AUDIO_FC, "bias"));
+                } break;
+            case PROJECTOR_TYPE_QWEN3A:
+                {
+                    model.conv2d_1_w = get_tensor(string_format(TN_CONV2D, 1, "weight"));
+                    model.conv2d_1_b = get_tensor(string_format(TN_CONV2D, 1, "bias"));
+                    model.conv2d_2_w = get_tensor(string_format(TN_CONV2D, 2, "weight"));
+                    model.conv2d_2_b = get_tensor(string_format(TN_CONV2D, 2, "bias"));
+                    model.conv2d_3_w = get_tensor(string_format(TN_CONV2D, 3, "weight"));
+                    model.conv2d_3_b = get_tensor(string_format(TN_CONV2D, 3, "bias"));
+                    model.conv_out_w = get_tensor(string_format(TN_CONV_OUT, "weight")); // no bias
+                    model.mm_1_w = get_tensor(string_format(TN_MM_AUDIO_MLP, 1, "weight"));
+                    model.mm_1_b = get_tensor(string_format(TN_MM_AUDIO_MLP, 1, "bias"));
+                    model.mm_2_w = get_tensor(string_format(TN_MM_AUDIO_MLP, 2, "weight"));
+                    model.mm_2_b = get_tensor(string_format(TN_MM_AUDIO_MLP, 2, "bias"));
                 } break;
             case PROJECTOR_TYPE_VOXTRAL:
                 {
@@ -3524,6 +3553,14 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
                     n_patches /= 2;
                 }
             } break;
+        case PROJECTOR_TYPE_QWEN3A:
+            {
+                // This encoder has 3 layers of conv2d, each with kernel size 3, stride 2, padding 1.
+                // So the resize formula is `(((x + 1) / 2 + 1) / 2 + 1) / 2`.
+                // But the CNN is applied separately to each 100-element chunk of the input
+                // (with final chunk being potentially smaller), so the chunk-aware formula looks like this.
+                n_patches = (img->nx / 100) * 13 + (((img->nx % 100 + 1) / 2 + 1) / 2 + 1) / 2;
+            } break;
         case PROJECTOR_TYPE_GLMA:
             {
                 n_patches = img->nx;
@@ -3905,6 +3942,7 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
         case PROJECTOR_TYPE_ULTRAVOX:
         case PROJECTOR_TYPE_LFM2:
         case PROJECTOR_TYPE_VOXTRAL:
+        case PROJECTOR_TYPE_QWEN3A:
         case PROJECTOR_TYPE_MUSIC_FLAMINGO:
         case PROJECTOR_TYPE_JANUS_PRO:
         case PROJECTOR_TYPE_PHI4:
@@ -4071,8 +4109,8 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
             return ctx->model.mm_model_proj->ne[1];
         case PROJECTOR_TYPE_QWEN2A:
             return ctx->model.mm_fc_w->ne[1];
+        case PROJECTOR_TYPE_QWEN3A:
         case PROJECTOR_TYPE_GLMA:
-            return ctx->model.mm_2_w->ne[1];
         case PROJECTOR_TYPE_LFM2:
         case PROJECTOR_TYPE_KIMIVL:
         case PROJECTOR_TYPE_PADDLEOCR:
@@ -4118,6 +4156,7 @@ bool clip_has_whisper_encoder(const struct clip_ctx * ctx) {
     switch (ctx->proj_type()) {
         case PROJECTOR_TYPE_ULTRAVOX:
         case PROJECTOR_TYPE_QWEN2A:
+        case PROJECTOR_TYPE_QWEN3A:
         case PROJECTOR_TYPE_GLMA:
         case PROJECTOR_TYPE_VOXTRAL:
         case PROJECTOR_TYPE_MUSIC_FLAMINGO:

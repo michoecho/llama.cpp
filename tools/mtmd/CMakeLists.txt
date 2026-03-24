@@ -32,6 +32,7 @@ add_library(mtmd
             models/whisper-enc.cpp
             models/mobilenetv5.cpp
             models/youtuvl.cpp
+            models/qwen3a.cpp
             )
 
 set_target_properties(mtmd PROPERTIES
