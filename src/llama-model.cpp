@@ -2166,6 +2166,30 @@ int32_t llama_model_n_ctx_train(const llama_model * model) {
     return model->hparams.n_ctx_train;
 }
 
+void llama_model_get_tok_embd(const llama_model * model,
+                              const llama_token * tokens,
+                              int32_t             n_tokens,
+                              float             * output) {
+    const int n_embd = model->hparams.n_embd;
+    const struct ggml_tensor * tok_embd = model->tok_embd;
+    const size_t row_size = ggml_row_size(tok_embd->type, n_embd);
+
+    // Use a host-side buffer to hold one row at a time, since the tensor
+    // may live in device (GPU) memory.
+    std::vector<uint8_t> row_buf(row_size);
+
+    for (int32_t i = 0; i < n_tokens; i++) {
+        const llama_token t = tokens[i];
+        // Copy row from potentially non-host memory to host buffer
+        ggml_backend_tensor_get(tok_embd, row_buf.data(), t * row_size, row_size);
+        // Dequantize into float
+        ggml_get_type_traits(tok_embd->type)->to_float(
+            row_buf.data(),
+            output + i * n_embd,
+            n_embd);
+    }
+}
+
 int32_t llama_model_n_embd(const llama_model * model) {
     return model->hparams.n_embd;
 }

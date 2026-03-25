@@ -557,6 +557,13 @@ extern "C" {
     LLAMA_API int32_t llama_model_n_embd     (const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_embd_inp (const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_embd_out (const struct llama_model * model);
+
+    // Copy token embedding vectors into output buffer.
+    // output must have space for n_tokens * llama_model_n_embd(model) floats.
+    LLAMA_API void llama_model_get_tok_embd(const struct llama_model * model,
+                                            const llama_token        * tokens,
+                                            int32_t                    n_tokens,
+                                            float                    * output);
     LLAMA_API int32_t llama_model_n_layer    (const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_head     (const struct llama_model * model);
     LLAMA_API int32_t llama_model_n_head_kv  (const struct llama_model * model);
