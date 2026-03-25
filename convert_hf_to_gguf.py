@@ -4646,6 +4646,10 @@ class Qwen3Model(Qwen2Model):
                 if is_tied_head:
                     yield from super().modify_tensors(data_torch, name, bid)
                 return
+        if "forced_aligner" in self.hparams.get("thinker_config", {}).get("model_type"):
+            if "lm_head.weight" in name:
+                n_vocab = self.hparams["thinker_config"]["text_config"]["vocab_size"]
+                data_torch = torch.nn.functional.pad(data_torch, (0, 0, 0, n_vocab - data_torch.shape[0]), value=float('-inf'))
 
         yield from super().modify_tensors(data_torch, name, bid)
 
