@@ -363,9 +363,18 @@ static bool log_mel_spectrogram(
     // Padding
     std::vector<float> samples_padded;
     if (params.center_padding) {
-        const auto pad_amount = frame_size / 2;
-        samples_padded = std::vector<float>(n_samples + 2 * pad_amount, 0);
+        const int pad_amount = frame_size / 2;
+        samples_padded.resize(n_samples + 2 * pad_amount);
+        // copy original samples into the center
         std::copy(samples, samples + n_samples, samples_padded.data() + pad_amount);
+        // reflect-pad the left edge: samples_padded[pad_amount - i] = samples[i] for i in [1, pad_amount]
+        for (int i = 1; i <= pad_amount && i < (int)n_samples; ++i) {
+            samples_padded[pad_amount - i] = samples[i];
+        }
+        // reflect-pad the right edge: samples_padded[pad_amount + n_samples + i - 1] = samples[n_samples - 1 - i] for i in [1, pad_amount]
+        for (int i = 1; i <= pad_amount && i < (int)n_samples; ++i) {
+            samples_padded[pad_amount + n_samples + i - 1] = samples[n_samples - 1 - i];
+        }
         samples = samples_padded.data();
         n_samples = samples_padded.size();
     } else {
@@ -533,7 +542,7 @@ bool mtmd_audio_preprocessor_whisper::preprocess(const float *                 s
     params.hann_window_size = hparams.audio_window_len;
     params.hop_length       = hparams.audio_hop_len;
     params.sample_rate      = hparams.audio_sample_rate;
-    params.center_padding   = false;
+    params.center_padding   = true;
     params.preemph          = 0.0f;  // disabled
     params.use_natural_log  = false;
     params.norm_per_feature = false;
@@ -561,9 +570,6 @@ bool mtmd_audio_preprocessor_whisper::preprocess(const float *                 s
     GGML_ASSERT((size_t) out_full.n_len > frames_per_chunk);
     for (size_t off = 0; off < (size_t) out_full.n_len; off += frames_per_chunk) {
         int n_len = std::min(frames_per_chunk, (size_t) out_full.n_len - off);
-        if ((size_t) n_len < frames_per_chunk) {
-            break;  // last incomplete chunk will always be a padded chunk, safe to ignore
-        }
 
         mtmd_audio_mel out_chunk;
         out_chunk.n_len     = n_len;
@@ -573,7 +579,7 @@ bool mtmd_audio_preprocessor_whisper::preprocess(const float *                 s
 
         for (int i = 0; i < out_full.n_mel; i++) {
             auto src = out_full.data.begin() + i * out_full.n_len + off;
-            out_chunk.data.insert(out_chunk.data.end(), src, src + frames_per_chunk);
+            out_chunk.data.insert(out_chunk.data.end(), src, src + n_len);
         }
 
         output.push_back(std::move(out_chunk));
