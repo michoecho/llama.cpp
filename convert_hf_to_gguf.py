@@ -4656,6 +4656,25 @@ class Qwen3Model(Qwen2Model):
 @ModelBase.register("Qwen3ASRForConditionalGeneration")
 class Qwen3ASRModel(Qwen3Model):
     model_arch = gguf.MODEL_ARCH.QWEN3
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        import tempfile
+        from transformers import AutoTokenizer
+
+        tokenizer = AutoTokenizer.from_pretrained(self.dir_model)
+        self._tmpdir = tempfile.TemporaryDirectory()
+        tmpdir = Path(self._tmpdir.name)
+        tokenizer.save_pretrained(tmpdir)
+
+        saved_files = set(os.listdir(tmpdir))
+        for entry in os.listdir(self.dir_model):
+            if entry not in saved_files:
+                os.symlink(self.dir_model / entry, tmpdir / entry)
+
+        self.dir_model = tmpdir
+
     def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
         if name.startswith("thinker."):
             name = name.replace("thinker.", "")
